@@ -32,6 +32,31 @@ function parseDate(val) {
     return isNaN(date.getTime()) ? null : date;
 }
 
+function isValidDateFormat(dateStr) {
+    if (!dateStr) return false;
+
+    // YYYY-MM-DD HH:MI:SS 형식 검증 (정규식)
+    const regex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+    if (!regex.test(dateStr)) return false;
+
+    // 실제 날짜로 파싱 가능한지 확인
+    const date = new Date(dateStr);
+    return !isNaN(date.getTime());
+}
+
+function formatDuration(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    const hour = Math.floor(min / 60);
+    const minRemain = min % 60;
+
+    if (hour > 0) {
+        return `${hour}시간 ${minRemain}분 ${sec}초`;
+    }
+    return `${minRemain}분 ${sec}초`;
+}
+
 // =======================================================================
 // [설정] 상태값 매핑 테이블
 // =======================================================================
@@ -99,33 +124,79 @@ server.tool(
       const COL_Y = "y좌표";
       const COL_SERVICE = "service";
 
-      let eventLog = []; 
-      let prevDrive = null;
-      let prevCharge = null;
+      let eventLog = [];
+      let prevDrive = null; // 이전 주행상태
+      let prevCharge = null; // 이전 충전상태
+      let prevTime = null; // 이전 수집일시
+      let skippedCount = 0; // 건너뛴 행 개수
+
+      // 진행 상황 로깅을 위한 변수
+      let processedCount = 0;
+      const logInterval = Math.floor(data.length / 10) || 1000;
 
       data.forEach((row, index) => {
+        processedCount++;
+
+        // 진행 상황 로깅 (10% 단위)
+        if (processedCount % logInterval === 0) {
+            const progress = Math.floor((processedCount / data.length) * 100);
+            logToConsole(`처리 진행: ${progress}% (${processedCount}/${data.length})`);
+        }
+
         const timeVal = row[COL_TIME];
-        const driveVal = Number(row[COL_DRIVE]); 
-        const chargeVal = String(row[COL_CHARGE]).toLowerCase(); 
+        const driveVal = Number(row[COL_DRIVE]);
+        const chargeVal = String(row[COL_CHARGE]).toLowerCase();
 
         const xVal = row[COL_X] !== undefined ? Number(row[COL_X]).toFixed(2) : '-';
         const yVal = row[COL_Y] !== undefined ? Number(row[COL_Y]).toFixed(2) : '-';
         let serviceVal = row[COL_SERVICE] || '-';
 
-        if (String(serviceVal).length > 200) {
-            serviceVal = String(serviceVal).substring(0, 197) + "...";
+        if (String(serviceVal).length > 1000) {
+            serviceVal = String(serviceVal).substring(0, 997) + "...";
         }
 
-        if (!timeVal) return;
-        const dateStr = parseDate(timeVal)?.toLocaleString() || timeVal;
+        const parsedDate = parseDate(timeVal);
+        const dateStr = parsedDate?.toLocaleString() || timeVal;
         const driveText = getDriveText(driveVal);
         const chargeText = getChargeText(chargeVal);
 
         const locationInfo = `(위치: ${xVal}, ${yVal} | 서비스: ${serviceVal})`;
 
+        // 수집일시 형식 검증
+        if (!timeVal || !isValidDateFormat(String(timeVal))) {
+            skippedCount++;
+            eventLog.push(`[${dateStr}] 수집일시 형식 오류: "${timeVal}" (YYYY-MM-DD HH:MI:SS 형식이 아님) - 건너뜀`);
+            return; // 이 행 건너뛰기
+        }
+
         // 첫 데이터 기록
         if (index === 0) {
-            eventLog.push(`[${dateStr}] >> 분석 시작 (초기상태: ${driveText}, ${chargeText}, ${locationInfo})`);
+            eventLog.push(`[${dateStr}] >>> 분석 시작 (초기상태: ${driveText}, ${chargeText}, ${locationInfo})`);
+        }
+
+        // 0. 수집일시 간격(>= 1분) 감지 및 시간 역행 감지
+        if (parsedDate && prevTime) {
+            const diffMs = parsedDate.getTime() - prevTime.getTime();
+
+            // 시간 역행 감지 (현재 시간이 이전 시간보다 과거인 경우)
+            if (diffMs < 0) {
+                const prevStr = prevTime.toLocaleString();
+                const currentStr = parsedDate.toLocaleString();
+                eventLog.push(
+                    `[${dateStr}] 시간 역행 오류: 이전 수집일시 ${prevStr} → 현재 ${currentStr} (${formatDuration(Math.abs(diffMs))} 과거로 이동)`
+                );
+                // 이 행을 건너뛰고 prevTime 유지
+                return;
+            }
+
+            // 5분 이상 간격 감지
+            if (diffMs >= 300_000) {
+                const prevStr = prevTime.toLocaleString();
+                const diffText = formatDuration(diffMs);
+                eventLog.push(
+                    `[${dateStr}] 수집 간격 초과: 이전 수집일시 ${prevStr} 대비 ${diffText} 지연`
+                );
+            }
         }
 
         // 1. 주행 상태 변화 감지
@@ -142,6 +213,7 @@ server.tool(
 
         prevDrive = driveVal;
         prevCharge = chargeVal;
+        if (parsedDate) prevTime = parsedDate;
       });
 
       // 로그 길이 제한 (너무 길면 자름)
@@ -154,6 +226,7 @@ server.tool(
                             [로봇 데이터 분석 결과]
                             파일명: ${path.basename(filePath)}
                             총 데이터: ${data.length}행
+                            건너뛴 행: ${skippedCount}행 (날짜 형식 오류)
                             감지된 이벤트: ${eventLog.length}건
 
                             --- 타임라인 (Timeline) ---
@@ -161,9 +234,9 @@ server.tool(
                             --- 끝 ---
                         `;
 
-      logToFile(`>>> [완료] ${eventLog.length}건 반환`);
-      logToConsole(`변환된 데이터 전송 완료 (${eventLog.length}건)`);
-      
+      logToFile(`>>> [완료] ${eventLog.length}건 반환 (${skippedCount}행 건너뜀)`);
+      logToConsole(`변환된 데이터 전송 완료 (${eventLog.length}건, ${skippedCount}행 건너뜀)`);
+
       return {
         content: [{ type: "text", text: resultText }]
       };
