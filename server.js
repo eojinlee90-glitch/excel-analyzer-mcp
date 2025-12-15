@@ -94,7 +94,7 @@ function getChargeText(code) {
 
 server.tool(
   "fetch_robot_events",
-  "엑셀 파일에서 로봇의 상태가 변경된 시점(이벤트)들의 목록을 추출합니다.",
+  "로봇 주행 로그(엑셀)를 분석하여 주행 및 충전 상태가 변경된 시점과 시간적 이상 징후(역행/누락)를 감지하고, 이를 타임라인 형태의 요약된 이벤트 목록으로 반환합니다.",
   {
     file_path: z.string().describe("분석할 엑셀 파일의 절대 경로")
   },
@@ -120,6 +120,7 @@ server.tool(
       const COL_TIME = "수집일시";
       const COL_DRIVE = "주행상태";
       const COL_CHARGE = "충전상태";
+      const COL_MODE = "서비스모드";
       const COL_X = "x좌표";
       const COL_Y = "y좌표";
       const COL_SERVICE = "service";
@@ -146,6 +147,7 @@ server.tool(
         const timeVal = row[COL_TIME];
         const driveVal = Number(row[COL_DRIVE]);
         const chargeVal = String(row[COL_CHARGE]).toLowerCase();
+        const modeVal = row[COL_MODE];
 
         const xVal = row[COL_X] !== undefined ? Number(row[COL_X]).toFixed(2) : '-';
         const yVal = row[COL_Y] !== undefined ? Number(row[COL_Y]).toFixed(2) : '-';
@@ -160,7 +162,7 @@ server.tool(
         const driveText = getDriveText(driveVal);
         const chargeText = getChargeText(chargeVal);
 
-        const locationInfo = `(위치: ${xVal}, ${yVal} | 서비스: ${serviceVal})`;
+        const locationInfo = `(서비스모드: ${modeVal} | 위치: ${xVal}, ${yVal} | 서비스: ${serviceVal})`;
 
         // 수집일시 형식 검증
         if (!timeVal || !isValidDateFormat(String(timeVal))) {
@@ -211,14 +213,19 @@ server.tool(
             eventLog.push(`[${dateStr}] 충전 상태 변경: ${prevText} ➔ ${chargeText} ${locationInfo}`);
         }
 
+        // 3. 상태 변화가 없더라도 파일의 마지막 행이면 현재 상태를 출력
+        if (index === data.length - 1) {
+             eventLog.push(`[${dateStr}] >>> 분석 종료 (최종상태: ${driveText}, ${chargeText}, ${locationInfo})`);
+        }
+
         prevDrive = driveVal;
         prevCharge = chargeVal;
         if (parsedDate) prevTime = parsedDate;
       });
 
       // 로그 길이 제한 (너무 길면 자름)
-      if (eventLog.length > 5000) {
-          eventLog = eventLog.slice(0, 5000);
+      if (eventLog.length > 10000) {
+          eventLog = eventLog.slice(0, 10000);
           eventLog.push("... (이후 데이터 생략됨)");
       }
 
