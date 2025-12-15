@@ -111,7 +111,7 @@ server.tool(
     try {
       const workbook = xlsx.readFile(filePath);
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const data = xlsx.utils.sheet_to_json(sheet);
+      const data = xlsx.utils.sheet_to_json(sheet, { defval: "" });
 
       if (!data || data.length === 0) {
         return { content: [{ type: "text", text: "데이터가 비어 있습니다." }] };
@@ -224,8 +224,8 @@ server.tool(
       });
 
       // 로그 길이 제한 (너무 길면 자름)
-      if (eventLog.length > 10000) {
-          eventLog = eventLog.slice(0, 10000);
+      if (eventLog.length > 3000) {
+          eventLog = eventLog.slice(0, 3000);
           eventLog.push("... (이후 데이터 생략됨)");
       }
 
