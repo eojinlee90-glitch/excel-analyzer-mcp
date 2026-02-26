@@ -27,14 +27,17 @@ async function main() {
     const tools = await client.listTools();
     console.log("사용 가능한 도구:", tools.tools.map(t => t.name));
 
-    const excelPath = "C:/Users/82222190/Downloads/robot_cycle_2025-12-11.xlsx";
+    const excelPath = "C:/Users/82222190/Downloads/로봇 주기 로그 상세_2026-02-03.xlsx";
 
     console.log("\n=== 도구 호출 시작 ===");
     console.log(`파일 경로: ${excelPath}`);
 
+    const useTool = tools.tools[0];
+    console.log(`사용할 도구: ${useTool.name}`);
+
     try {
         const result = await client.callTool({
-            name: "fetch_robot_events",
+            name: useTool.name,
             arguments: {
                 file_path: excelPath
             }
@@ -44,12 +47,39 @@ async function main() {
         console.log(JSON.stringify(result, null, 2));
 
         console.log("\n=== 결과 내용 ===");
+        let textContent = "";
         if (result.content && Array.isArray(result.content)) {
             for (const block of result.content) {
                 if (block.type === "text") {
                     console.log(block.text);
+                    textContent += block.text + "\n";
                 }
             }
+
+
+            // if (!textContent.trim()) {
+            //     console.log("결과 내용이 없습니다.");
+            // } else {
+            //     // OpenAI API로 분석
+            //     console.log("\n=== OpenAI API로 분석 요청 ===");
+            //     const openai = new OpenAI({
+            //         apiKey: process.env.OPENAI_API_KEY // 환경변수에 API Key 설정
+            //     });
+            //
+            //     const completion = await openai.chat.completions.create({
+            //         model: "gpt-4o-mini", // 적절한 모델 선택
+            //         messages: [
+            //             { role: "system", content: "다음은 로봇 이벤트 로그 데이터입니다. 의미 있는 분석과 주요 인사이트를 제공하세요." },
+            //             { role: "user", content: textContent }
+            //         ],
+            //         temperature: 0.2
+            //     });
+            //
+            //     console.log("\n=== 분석 결과 ===");
+            //     console.log(completion.choices[0].message.content);
+            // }
+
+
         } else {
             console.log("결과 내용이 없습니다.");
         }
